@@ -235,13 +235,38 @@ func newArticlesCommand() *cobra.Command {
 			}
 
 			return withDatabase(cmd, func(db *storage.Database) error {
-				articles, blogNames, err := controller.GetArticles(cmd.Context(), db, showAll, viper.GetString("blog"), viper.GetString("category"), since, before)
+				filter := storage.ArticleFilter{
+					UnreadOnly: !showAll,
+					Category:   stringPtr(viper.GetString("category")),
+					Since:      since,
+					Before:     before,
+					Search:     viper.GetString("search"),
+					Limit:      viper.GetInt("limit"),
+				}
+
+				blogName := viper.GetString("blog")
+				if blogName != "" {
+					blog, err := db.GetBlogByName(cmd.Context(), blogName)
+					if err != nil {
+						return err
+					}
+					if blog == nil {
+						err := fmt.Errorf("blog '%s' not found", blogName)
+						printError(err)
+						return markError(err)
+					}
+					filter.BlogID = &blog.ID
+				}
+
+				articles, blogNames, err := controller.GetArticles(cmd.Context(), db, filter)
 				if err != nil {
 					printError(err)
 					return markError(err)
 				}
 				if len(articles) == 0 {
-					if showAll {
+					if viper.GetString("search") != "" {
+						cprintf([]color.Attribute{color.FgYellow}, "No articles matching '%s'.\n", viper.GetString("search"))
+					} else if showAll {
 						fmt.Println("No articles found.")
 					} else {
 						cprintln([]color.Attribute{color.FgGreen}, "No unread articles!")
@@ -252,6 +277,9 @@ func newArticlesCommand() *cobra.Command {
 				label := "Unread articles"
 				if showAll {
 					label = "All articles"
+				}
+				if viper.GetString("search") != "" {
+					label = fmt.Sprintf("Search results for '%s'", viper.GetString("search"))
 				}
 				cprintf([]color.Attribute{color.FgCyan, color.Bold}, "%s (%d):\n\n", label, len(articles))
 				for _, article := range articles {
@@ -267,6 +295,8 @@ func newArticlesCommand() *cobra.Command {
 	cmd.Flags().StringP("category", "c", "", "Filter by category")
 	cmd.Flags().String("since", "", "Show articles published on or after YYYY-MM-DD")
 	cmd.Flags().String("before", "", "Show articles published before YYYY-MM-DD")
+	cmd.Flags().StringP("search", "s", "", "Search articles by title or content (FTS5 full-text search)")
+	cmd.Flags().IntP("limit", "n", 20, "Maximum number of articles to return")
 	return cmd
 }
 
@@ -306,7 +336,23 @@ func newReadAllCommand() *cobra.Command {
 			blogName := viper.GetString("blog")
 
 			return withDatabase(cmd, func(db *storage.Database) error {
-				articles, _, err := controller.GetArticles(cmd.Context(), db, false, blogName, "", nil, nil)
+				filter := storage.ArticleFilter{
+					UnreadOnly: true,
+				}
+				if blogName != "" {
+					blog, err := db.GetBlogByName(cmd.Context(), blogName)
+					if err != nil {
+						return err
+					}
+					if blog == nil {
+						err := fmt.Errorf("blog '%s' not found", blogName)
+						printError(err)
+						return markError(err)
+					}
+					filter.BlogID = &blog.ID
+				}
+
+				articles, _, err := controller.GetArticles(cmd.Context(), db, filter)
 				if err != nil {
 					printError(err)
 					return markError(err)
@@ -330,7 +376,7 @@ func newReadAllCommand() *cobra.Command {
 					}
 				}
 
-				marked, err := controller.MarkAllArticlesRead(cmd.Context(), db, blogName)
+				marked, err := controller.MarkAllArticlesRead(cmd.Context(), db, filter)
 				if err != nil {
 					printError(err)
 					return markError(err)
@@ -506,6 +552,13 @@ func parseDateRange(sinceStr, beforeStr string) (*time.Time, *time.Time, error) 
 		return nil, nil, fmt.Errorf("--since (%s) must be on or before --before (%s)", sinceStr, beforeStr)
 	}
 	return since, before, nil
+}
+
+func stringPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func confirm(prompt string) (bool, error) {
