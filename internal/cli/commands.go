@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -234,6 +235,13 @@ func newArticlesCommand() *cobra.Command {
 				return markError(err)
 			}
 
+			limit := viper.GetInt("limit")
+			if limit < 0 {
+				err := fmt.Errorf("invalid --limit: %d (must be >= 0)", limit)
+				printError(err)
+				return markError(err)
+			}
+
 			return withDatabase(cmd, func(db *storage.Database) error {
 				filter := storage.ArticleFilter{
 					UnreadOnly: !showAll,
@@ -241,22 +249,14 @@ func newArticlesCommand() *cobra.Command {
 					Since:      since,
 					Before:     before,
 					Search:     viper.GetString("search"),
-					Limit:      viper.GetInt("limit"),
+					Limit:      limit,
 				}
 
-				blogName := viper.GetString("blog")
-				if blogName != "" {
-					blog, err := db.GetBlogByName(cmd.Context(), blogName)
-					if err != nil {
-						return err
-					}
-					if blog == nil {
-						err := fmt.Errorf("blog '%s' not found", blogName)
-						printError(err)
-						return markError(err)
-					}
-					filter.BlogID = &blog.ID
+				blogID, err := resolveBlogID(cmd.Context(), db, viper.GetString("blog"))
+				if err != nil {
+					return err
 				}
+				filter.BlogID = blogID
 
 				articles, blogNames, err := controller.GetArticles(cmd.Context(), db, filter)
 				if err != nil {
@@ -333,24 +333,15 @@ func newReadAllCommand() *cobra.Command {
 		Use:   "read-all",
 		Short: "Mark all unread articles as read.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			blogName := viper.GetString("blog")
-
 			return withDatabase(cmd, func(db *storage.Database) error {
 				filter := storage.ArticleFilter{
 					UnreadOnly: true,
 				}
-				if blogName != "" {
-					blog, err := db.GetBlogByName(cmd.Context(), blogName)
-					if err != nil {
-						return err
-					}
-					if blog == nil {
-						err := fmt.Errorf("blog '%s' not found", blogName)
-						printError(err)
-						return markError(err)
-					}
-					filter.BlogID = &blog.ID
+				blogID, err := resolveBlogID(cmd.Context(), db, viper.GetString("blog"))
+				if err != nil {
+					return err
 				}
+				filter.BlogID = blogID
 
 				articles, _, err := controller.GetArticles(cmd.Context(), db, filter)
 				if err != nil {
@@ -364,8 +355,8 @@ func newReadAllCommand() *cobra.Command {
 
 				if !viper.GetBool("yes") {
 					scope := "all blogs"
-					if blogName != "" {
-						scope = fmt.Sprintf("from '%s'", blogName)
+					if blog := viper.GetString("blog"); blog != "" {
+						scope = fmt.Sprintf("from '%s'", blog)
 					}
 					confirmed, err := confirm(fmt.Sprintf("Mark %d article(s) %s as read?", len(articles), scope))
 					if err != nil {
@@ -559,6 +550,22 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func resolveBlogID(ctx context.Context, db *storage.Database, blogName string) (*int64, error) {
+	if blogName == "" {
+		return nil, nil
+	}
+	blog, err := db.GetBlogByName(ctx, blogName)
+	if err != nil {
+		return nil, err
+	}
+	if blog == nil {
+		err := fmt.Errorf("blog '%s' not found", blogName)
+		printError(err)
+		return nil, markError(err)
+	}
+	return &blog.ID, nil
 }
 
 func confirm(prompt string) (bool, error) {

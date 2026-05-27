@@ -152,12 +152,17 @@ func MarkAllArticlesRead(ctx context.Context, db *storage.Database, filter stora
 	if err != nil {
 		return nil, err
 	}
+	if len(articles) == 0 {
+		return articles, nil
+	}
 
-	for _, article := range articles {
-		_, err := db.MarkArticleRead(ctx, article.ID)
-		if err != nil {
-			return nil, err
-		}
+	ids := make([]int64, len(articles))
+	for i, a := range articles {
+		ids[i] = a.ID
+	}
+
+	if err := db.MarkArticlesRead(ctx, ids); err != nil {
+		return nil, err
 	}
 
 	return articles, nil

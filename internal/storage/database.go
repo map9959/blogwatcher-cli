@@ -71,11 +71,12 @@ func OpenDatabase(ctx context.Context, path string) (*Database, error) {
 		return nil, err
 	}
 
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	conn.SetMaxOpenConns(1)
 
 	db := &Database{path: path, conn: conn}
 	if err := db.migrate(); err != nil {
@@ -409,7 +410,11 @@ func (db *Database) ListArticles(ctx context.Context, filter ArticleFilter) ([]m
 		query = query.Where(sq.Lt{"published_date": filter.Before.UTC().Format(sqliteWriteLayout)})
 	}
 	if filter.Limit > 0 {
-		query = query.Limit(uint64(filter.Limit))
+		l := uint64(filter.Limit)
+		if l > 100 {
+			l = 100
+		}
+		query = query.Limit(l)
 	}
 	if filter.Offset > 0 {
 		query = query.Offset(uint64(filter.Offset))
@@ -461,11 +466,13 @@ func (db *Database) searchArticles(ctx context.Context, filter ArticleFilter) ([
 		query = query.Where(sq.Lt{"a.published_date": filter.Before.UTC().Format(sqliteWriteLayout)})
 	}
 
-	limit := filter.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 100
+	if filter.Limit > 0 {
+		l := uint64(filter.Limit)
+		if l > 100 {
+			l = 100
+		}
+		query = query.Limit(l)
 	}
-	query = query.Limit(uint64(limit))
 	if filter.Offset > 0 {
 		query = query.Offset(uint64(filter.Offset))
 	}
@@ -493,8 +500,18 @@ func (db *Database) searchArticles(ctx context.Context, filter ArticleFilter) ([
 	return articles, rows.Err()
 }
 
+// escapeFTS5Query prepares a user-supplied search string for use in an FTS5
+// MATCH clause. Words containing characters that are not valid in bare FTS5
+// tokens (single quotes, double quotes) are wrapped in double quotes so they
+// are treated as phrase tokens rather than causing a syntax error.
 func escapeFTS5Query(q string) string {
-	return strings.ReplaceAll(q, "'", "''")
+	words := strings.Fields(q)
+	for i, w := range words {
+		if strings.ContainsAny(w, "'\"") {
+			words[i] = `"` + strings.ReplaceAll(w, `"`, `""`) + `"`
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 func (db *Database) MarkArticleRead(ctx context.Context, id int64) (bool, error) {
@@ -511,6 +528,18 @@ func (db *Database) MarkArticleRead(ctx context.Context, id int64) (bool, error)
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+func (db *Database) MarkArticlesRead(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := sq.Update("articles").
+		Set("is_read", true).
+		Where(sq.Eq{"id": ids}).
+		RunWith(db.conn).
+		ExecContext(ctx)
+	return err
 }
 
 func (db *Database) MarkArticleUnread(ctx context.Context, id int64) (bool, error) {

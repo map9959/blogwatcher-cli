@@ -713,16 +713,49 @@ func TestListArticlesFilterBySearch(t *testing.T) {
 		require.Equal(t, "Rust memory safety", articles[0].Title)
 	})
 
-	t.Run("search combined with unread filter", func(t *testing.T) {
-		all, err := db.ListArticles(ctx, ArticleFilter{})
-		require.NoError(t, err)
-		require.NotEmpty(t, all)
-		_, err = db.MarkArticleRead(ctx, all[0].ID)
-		require.NoError(t, err)
+	t.Run("search with apostrophe does not need escaping", func(t *testing.T) {
+		_, err := db.AddArticle(ctx, model.Article{
+			BlogID:   blog.ID,
+			Title:    "Don't fear the goroutine",
+			URL:      "https://example.com/dont",
+			BodyText: "You don't need to worry about goroutines",
+		})
+		require.NoError(t, err, "add article with apostrophe")
 
-		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang", UnreadOnly: false})
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "don't"})
 		require.NoError(t, err)
-		require.Len(t, articles, 1)
+		require.Len(t, articles, 1, "should find article with apostrophe in query")
+		require.Equal(t, "Don't fear the goroutine", articles[0].Title)
+	})
+
+	t.Run("search matches body text", func(t *testing.T) {
+		_, err := db.AddArticle(ctx, model.Article{
+			BlogID:   blog.ID,
+			Title:    "Deep dive into channels",
+			URL:      "https://example.com/channels",
+			BodyText: "This article discusses golang concurrency channels in detail",
+		})
+		require.NoError(t, err, "add article with body text")
+
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "channels"})
+		require.NoError(t, err)
+		require.Len(t, articles, 1, "should find article by body text match")
+		require.Equal(t, "Deep dive into channels", articles[0].Title)
+	})
+
+	t.Run("search combined with unread filter", func(t *testing.T) {
+		golangArticles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang"})
+		require.NoError(t, err)
+		require.NotEmpty(t, golangArticles, "expected at least one article matching 'golang'")
+
+		for _, a := range golangArticles {
+			_, err = db.MarkArticleRead(ctx, a.ID)
+			require.NoError(t, err)
+		}
+
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang", UnreadOnly: true})
+		require.NoError(t, err)
+		require.Empty(t, articles, "expected no unread articles matching 'golang' after marking all matching articles as read")
 	})
 }
 
