@@ -241,6 +241,11 @@ func newArticlesCommand() *cobra.Command {
 				printError(err)
 				return markError(err)
 			}
+			if limit > storage.MaxListLimit {
+				err := fmt.Errorf("invalid --limit: %d (maximum is %d)", limit, storage.MaxListLimit)
+				printError(err)
+				return markError(err)
+			}
 
 			return withDatabase(cmd, func(db *storage.Database) error {
 				filter := storage.ArticleFilter{

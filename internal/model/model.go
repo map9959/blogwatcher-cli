@@ -20,5 +20,6 @@ type Article struct {
 	DiscoveredDate *time.Time
 	IsRead         bool
 	Categories     []string
-	BodyText       string
+	Description    string
+	Content        string
 }

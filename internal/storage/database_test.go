@@ -715,10 +715,10 @@ func TestListArticlesFilterBySearch(t *testing.T) {
 
 	t.Run("search with apostrophe does not need escaping", func(t *testing.T) {
 		_, err := db.AddArticle(ctx, model.Article{
-			BlogID:   blog.ID,
-			Title:    "Don't fear the goroutine",
-			URL:      "https://example.com/dont",
-			BodyText: "You don't need to worry about goroutines",
+			BlogID:      blog.ID,
+			Title:       "Don't fear the goroutine",
+			URL:         "https://example.com/dont",
+			Description: "You don't need to worry about goroutines",
 		})
 		require.NoError(t, err, "add article with apostrophe")
 
@@ -730,10 +730,10 @@ func TestListArticlesFilterBySearch(t *testing.T) {
 
 	t.Run("search matches body text", func(t *testing.T) {
 		_, err := db.AddArticle(ctx, model.Article{
-			BlogID:   blog.ID,
-			Title:    "Deep dive into channels",
-			URL:      "https://example.com/channels",
-			BodyText: "This article discusses golang concurrency channels in detail",
+			BlogID:      blog.ID,
+			Title:       "Deep dive into channels",
+			URL:         "https://example.com/channels",
+			Description: "This article discusses golang concurrency channels in detail",
 		})
 		require.NoError(t, err, "add article with body text")
 
